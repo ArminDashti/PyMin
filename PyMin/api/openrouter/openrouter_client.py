@@ -66,6 +66,7 @@ class OpenRouterClient:
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         stream: bool = False,
+        search: bool = None,
         **kwargs
     ) -> Dict[str, Any]:
         is_valid, error_message = self.validate_messages_format(messages)
@@ -90,12 +91,6 @@ class OpenRouterClient:
             return response.json()
         else:
             raise Exception(f'OpenRouter API Error: {response.status_code}, {response.text}')
-    
-
-    def simple_chat(self, message: str) -> str:
-        messages = [{'role': 'user', 'content': message}]
-        response = self.chat_completion(messages)
-        return response['choices'][0]['message']['content']
     
 
     def get_models(self) -> Dict[str, Any]:
