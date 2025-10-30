@@ -1,0 +1,2 @@
+[console_scripts]
+pymin = PyMin.__main__:main
