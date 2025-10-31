@@ -9,7 +9,6 @@ import pandas as pd
 import numpy as np
 from typing import Optional, Dict, Any, List, Tuple, Union
 import warnings
-import logging
 from datetime import datetime, timedelta
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
@@ -56,10 +55,6 @@ class ProphetValidation:
         """Initialize ProphetValidation."""
         if not PROPHET_AVAILABLE:
             raise ImportError("Prophet is required but not installed. Install with: pip install prophet")
-        
-        # Setup logging
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
     
     def cross_validate_model(self, 
                            model: Prophet,
@@ -96,7 +91,6 @@ class ProphetValidation:
             )
             return cv_results
         except Exception as e:
-            self.logger.error(f"Cross-validation failed: {str(e)}")
             raise
     
     def calculate_cv_metrics(self, cv_results: pd.DataFrame) -> Dict[str, float]:
@@ -305,10 +299,6 @@ class ProphetValidation:
             plt.tight_layout()
             plt.show()
             return None
-        
-        else:
-            self.logger.warning("Neither Plotly nor Matplotlib available for plotting")
-            return None
     
     def compare_models(self, 
                       models: Dict[str, Prophet],
@@ -340,7 +330,6 @@ class ProphetValidation:
                 comparison_results.append(metrics)
                 
             except Exception as e:
-                self.logger.error(f"Failed to validate model {model_name}: {str(e)}")
                 continue
         
         return pd.DataFrame(comparison_results)
@@ -398,7 +387,6 @@ class ProphetValidation:
                     best_params = params
                     
             except Exception as e:
-                self.logger.error(f"Failed to evaluate parameters {params}: {str(e)}")
                 continue
         
         return {
@@ -468,10 +456,6 @@ class ProphetValidation:
             
             plt.tight_layout()
             plt.show()
-            return None
-        
-        else:
-            self.logger.warning("Neither Plotly nor Matplotlib available for plotting")
             return None
     
     def generate_validation_report(self, 

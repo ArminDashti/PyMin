@@ -59,7 +59,6 @@ def numpy_to_image(numpy_array, output_path):
 
 
 def validate_image_path(image_path: Union[str, Path], supported_formats: set = None) -> Tuple[bool, str]:
-    """Validate if the image path exists and is in a supported format."""
     if supported_formats is None:
         supported_formats = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
     
@@ -81,35 +80,22 @@ def validate_image_path(image_path: Union[str, Path], supported_formats: set = N
 
 
 def encode_image_to_base64(image_path: Union[str, Path], supported_formats: set = None) -> Tuple[bool, str, str]:
-    """
-    Encode an image file to base64 format.
-    
-    Args:
-        image_path: Path to the image file
-        supported_formats: Set of supported image file extensions (optional)
-    
-    Returns:
-        tuple: (success: bool, data: str, mime_type: str)
-    """
     if supported_formats is None:
         supported_formats = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
     
     try:
         path = Path(image_path)
         
-        # Validate image path
         is_valid, error_msg = validate_image_path(path, supported_formats)
         if not is_valid:
             return False, "", error_msg
         
-        # Read and encode the image
         with open(path, 'rb') as image_file:
             image_data = base64.b64encode(image_file.read()).decode('utf-8')
         
-        # Get MIME type
         mime_type, _ = mimetypes.guess_type(str(path))
         if not mime_type or not mime_type.startswith('image/'):
-            mime_type = 'image/jpeg'  # Default fallback
+            mime_type = 'image/jpeg'
         
         return True, image_data, mime_type
         

@@ -9,7 +9,6 @@ import pandas as pd
 import numpy as np
 from typing import Optional, Dict, Any, List, Tuple
 import warnings
-import logging
 from datetime import datetime, timedelta
 from scipy import stats
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -68,10 +67,6 @@ class ProphetAnalysis:
         self.model = model
         self.forecast = forecast
         self.training_data = None
-        
-        # Setup logging
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
     
     def set_model(self, model: Prophet, forecast: pd.DataFrame, training_data: pd.DataFrame) -> None:
         """
@@ -459,10 +454,6 @@ class ProphetAnalysis:
             
             plt.tight_layout()
             plt.show()
-            return None
-        
-        else:
-            self.logger.warning("Neither Plotly nor Matplotlib available for plotting")
             return None
     
     def generate_report(self) -> str:

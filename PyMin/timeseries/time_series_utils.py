@@ -10,30 +10,14 @@ import numpy as np
 from typing import Optional, Dict, Any, List, Tuple, Union
 import warnings
 from datetime import datetime, timedelta
-import logging
 from scipy import stats
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 
 class TimeSeriesUtils:
-    """
-    Utility class for time series data preprocessing and analysis.
-    
-    This class provides methods for:
-    - Data validation and cleaning
-    - Missing value handling
-    - Outlier detection and treatment
-    - Data transformation and scaling
-    - Time series decomposition
-    - Statistical analysis
-    - Data resampling and aggregation
-    """
-    
     def __init__(self):
-        """Initialize TimeSeriesUtils."""
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
+        pass
     
     @staticmethod
     def validate_time_series_data(df: pd.DataFrame, 
@@ -41,8 +25,6 @@ class TimeSeriesUtils:
                                  value_col: str = 'y',
                                  min_periods: int = 10) -> Tuple[bool, List[str]]:
         """
-        Validate time series data for common issues.
-        
         Args:
             df (pd.DataFrame): Input dataframe
             datetime_col (str): Name of datetime column

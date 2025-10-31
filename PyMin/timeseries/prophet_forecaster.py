@@ -10,7 +10,6 @@ import numpy as np
 from typing import Optional, Dict, Any, List, Union, Tuple
 import warnings
 from datetime import datetime, timedelta
-import logging
 
 try:
     from prophet import Prophet
@@ -27,7 +26,6 @@ try:
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
-    warnings.warn("Plotly not available. Install with: pip install plotly")
 
 try:
     import matplotlib.pyplot as plt
@@ -67,8 +65,6 @@ class ProphetForecaster:
                  uncertainty_samples: int = 1000,
                  stan_backend: Optional[str] = None):
         """
-        Initialize Prophet forecaster with configuration parameters.
-        
         Args:
             growth (str): Type of growth trend ('linear', 'logistic', 'flat')
             changepoint_prior_scale (float): Flexibility of trend changes
@@ -107,10 +103,6 @@ class ProphetForecaster:
         self.fitted = False
         self.forecast = None
         self.training_data = None
-        
-        # Setup logging
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
     
     def _validate_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -140,12 +132,10 @@ class ProphetForecaster:
         
         # Check for duplicates
         if df['ds'].duplicated().any():
-            self.logger.warning("Duplicate timestamps found. Aggregating by mean.")
             df = df.groupby('ds')['y'].mean().reset_index()
         
         # Check for missing values
         if df['y'].isna().any():
-            self.logger.warning("Missing values found in 'y' column. Forward filling.")
             df['y'] = df['y'].fillna(method='ffill')
         
         return df
@@ -203,8 +193,6 @@ class ProphetForecaster:
             for regressor in additional_regressors:
                 if regressor in df.columns:
                     self.model.add_regressor(regressor)
-                else:
-                    self.logger.warning(f"Regressor '{regressor}' not found in data")
         
         # Add custom seasonalities
         if custom_seasonalities:
@@ -218,10 +206,8 @@ class ProphetForecaster:
                 )
         
         # Fit the model
-        self.logger.info("Fitting Prophet model...")
         self.model.fit(df)
         self.fitted = True
-        self.logger.info("Model fitted successfully")
         
         return self
     
@@ -333,10 +319,6 @@ class ProphetForecaster:
                 self.model.plot_components(self.forecast)
             
             return None
-        
-        else:
-            self.logger.warning("Neither Plotly nor Matplotlib available for plotting")
-            return None
     
     def get_forecast_summary(self) -> Dict[str, Any]:
         """
@@ -396,8 +378,6 @@ class ProphetForecaster:
                 prior_scale=prior_scale,
                 mode=mode
             )
-        else:
-            self.logger.warning("Cannot add seasonality after model is fitted")
         
         return self
     
@@ -415,8 +395,6 @@ class ProphetForecaster:
         """
         if not self.fitted:
             self.model.add_regressor(name, prior_scale=prior_scale, mode=mode)
-        else:
-            self.logger.warning("Cannot add regressor after model is fitted")
         
         return self
     
@@ -463,7 +441,6 @@ class ProphetForecaster:
             'parameters': self.get_model_parameters()
         }
         joblib.dump(model_data, filepath)
-        self.logger.info(f"Model saved to {filepath}")
     
     def load_model(self, filepath: str) -> 'ProphetForecaster':
         """
@@ -487,5 +464,4 @@ class ProphetForecaster:
         for key, value in params.items():
             setattr(self, key, value)
         
-        self.logger.info(f"Model loaded from {filepath}")
         return self

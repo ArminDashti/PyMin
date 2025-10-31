@@ -8,7 +8,6 @@ It includes basic CRUD operations, connection management, and additional utility
 import pyodbc
 import pandas as pd
 from typing import List, Dict, Any, Optional, Union
-import logging
 from contextlib import contextmanager
 
 
@@ -42,10 +41,6 @@ class MSSQL:
         self.port = port
         self.driver = driver
         self.connection = None
-        
-        # Setup logging
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
     
     def _get_connection_string(self) -> str:
         """Generate connection string for MSSQL database."""
@@ -67,10 +62,8 @@ class MSSQL:
         """
         try:
             self.connection = pyodbc.connect(self._get_connection_string())
-            self.logger.info(f"Successfully connected to {self.database} on {self.ip_or_instance}")
             return True
         except Exception as e:
-            self.logger.error(f"Failed to connect to database: {str(e)}")
             return False
     
     def disconnect(self):
@@ -78,7 +71,6 @@ class MSSQL:
         if self.connection:
             self.connection.close()
             self.connection = None
-            self.logger.info("Database connection closed")
     
     def get_connection(self):
         """
@@ -102,7 +94,6 @@ class MSSQL:
             yield cursor
         except Exception as e:
             self.connection.rollback()
-            self.logger.error(f"Database operation failed: {str(e)}")
             raise
         finally:
             cursor.close()
@@ -144,7 +135,6 @@ class MSSQL:
                 data = cursor.fetchall()
                 return pd.DataFrame(data, columns=columns)
         except Exception as e:
-            self.logger.error(f"SELECT query failed: {str(e)}")
             raise
     
     def insert(self, table: str, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> int:
@@ -177,11 +167,9 @@ class MSSQL:
                     rows_affected += cursor.rowcount
                 
                 self.connection.commit()
-                self.logger.info(f"Inserted {rows_affected} rows into {table}")
                 return rows_affected
         except Exception as e:
             self.connection.rollback()
-            self.logger.error(f"INSERT query failed: {str(e)}")
             raise
     
     def update(self, table: str, data: Dict[str, Any], where: str) -> int:
@@ -205,11 +193,9 @@ class MSSQL:
                 cursor.execute(query, values)
                 rows_affected = cursor.rowcount
                 self.connection.commit()
-                self.logger.info(f"Updated {rows_affected} rows in {table}")
                 return rows_affected
         except Exception as e:
             self.connection.rollback()
-            self.logger.error(f"UPDATE query failed: {str(e)}")
             raise
     
     def delete(self, table: str, where: str) -> int:
@@ -230,11 +216,9 @@ class MSSQL:
                 cursor.execute(query)
                 rows_affected = cursor.rowcount
                 self.connection.commit()
-                self.logger.info(f"Deleted {rows_affected} rows from {table}")
                 return rows_affected
         except Exception as e:
             self.connection.rollback()
-            self.logger.error(f"DELETE query failed: {str(e)}")
             raise
     
     def execute_raw(self, query: str, params: tuple = None) -> pd.DataFrame:
@@ -264,7 +248,6 @@ class MSSQL:
                     return pd.DataFrame()
         except Exception as e:
             self.connection.rollback()
-            self.logger.error(f"Raw query execution failed: {str(e)}")
             raise
     
     def get_table_info(self, table: str) -> pd.DataFrame:
@@ -292,15 +275,22 @@ class MSSQL:
         """
         return self.execute_raw(query, (table,))
     
-    def get_tables(self) -> List[str]:
+    def get_tables(self, like: str = None) -> List[str]:
         """
         Get list of all tables in the database.
+        
+        Args:
+            like (str): Optional pattern to filter table names (e.g., 'user%' for tables starting with 'user')
         
         Returns:
             List[str]: List of table names
         """
         query = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'"
-        result = self.execute_raw(query)
+        if like:
+            query += " AND TABLE_NAME LIKE ?"
+            result = self.execute_raw(query, (like,))
+        else:
+            result = self.execute_raw(query)
         return result['TABLE_NAME'].tolist()
     
     def get_databases(self) -> List[str]:
@@ -314,18 +304,22 @@ class MSSQL:
         result = self.execute_raw(query)
         return result['name'].tolist()
     
-    def table_exists(self, table: str) -> bool:
+    def is_table_exist(self, table: str, like: str = None) -> bool:
         """
         Check if a table exists in the database.
         
         Args:
             table (str): Table name
-            
+            like (str): Optional pattern to filter table names (e.g., 'user%' for tables starting with 'user')
         Returns:
             bool: True if table exists, False otherwise
         """
         query = "SELECT COUNT(*) as count FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ?"
-        result = self.execute_raw(query, (table,))
+        if like:
+            query += " AND TABLE_NAME LIKE ?"
+            result = self.execute_raw(query, (like,))
+        else:
+            result = self.execute_raw(query, (table,))
         return result['count'].iloc[0] > 0
     
     def get_table_row_count(self, table: str) -> int:
@@ -345,23 +339,26 @@ class MSSQL:
     def create_table(self, table: str, columns: Dict[str, str]) -> bool:
         """
         Create a new table.
-        
+
         Args:
             table (str): Table name
             columns (Dict[str, str]): Column definitions (column_name: data_type)
-            
+
         Returns:
             bool: True if successful, False otherwise
         """
+
+        if columns is None:
+            raise ValueError("Columns dictionary must be provided.")
+
         column_definitions = [f"{col} {data_type}" for col, data_type in columns.items()]
+
         query = f"CREATE TABLE {table} ({', '.join(column_definitions)})"
-        
+
         try:
             self.execute_raw(query)
-            self.logger.info(f"Table {table} created successfully")
             return True
-        except Exception as e:
-            self.logger.error(f"Failed to create table {table}: {str(e)}")
+        except Exception:
             return False
     
     def drop_table(self, table: str) -> bool:
@@ -378,10 +375,8 @@ class MSSQL:
         
         try:
             self.execute_raw(query)
-            self.logger.info(f"Table {table} dropped successfully")
             return True
         except Exception as e:
-            self.logger.error(f"Failed to drop table {table}: {str(e)}")
             return False
     
     def backup_database(self, backup_path: str) -> bool:
@@ -398,26 +393,14 @@ class MSSQL:
         
         try:
             self.execute_raw(query)
-            self.logger.info(f"Database {self.database} backed up to {backup_path}")
             return True
         except Exception as e:
-            self.logger.error(f"Failed to backup database: {str(e)}")
             return False
-    
-    def __enter__(self):
-        """Context manager entry."""
-        self.connect()
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.disconnect()
     
     def copy_table(self, source_table: str, target_table: str = None, 
                    target_database: str = None, target_server: str = None,
                    target_username: str = None, target_password: str = None,
-                   target_port: int = None, copy_data: bool = True,
-                   create_table: bool = True, where_clause: str = None) -> bool:
+                   target_port: int = 1433, copy_data: bool = True) -> bool:
         """
         Copy a table from source to target database.
         
@@ -455,14 +438,12 @@ class MSSQL:
                 target_port = self.port
             
             # Check if source table exists
-            if not self.table_exists(source_table):
-                self.logger.error(f"Source table '{source_table}' does not exist")
+            if not self.is_table_exist(source_table):
                 return False
             
             # Get source table structure
             table_info = self.get_table_info(source_table)
             if table_info.empty:
-                self.logger.error(f"Could not retrieve structure for table '{source_table}'")
                 return False
             
             # Create target connection if different server/database
@@ -483,14 +464,13 @@ class MSSQL:
                 )
                 
                 if not target_db.connect():
-                    self.logger.error(f"Failed to connect to target database '{target_database}' on '{target_server}'")
                     return False
             else:
                 target_db = self
             
             try:
                 # Check if target table exists
-                target_exists = target_db.table_exists(target_table)
+                target_exists = target_db.is_table_exist(target_table)
                 
                 if create_table and not target_exists:
                     # Create target table with same structure
@@ -521,10 +501,7 @@ class MSSQL:
                     
                     create_query = f"CREATE TABLE {target_table} ({', '.join(column_definitions)})"
                     
-                    if target_db.execute_raw(create_query).empty is False:
-                        self.logger.info(f"Created target table '{target_table}' in database '{target_database}'")
-                    else:
-                        self.logger.info(f"Target table '{target_table}' created successfully")
+                    target_db.execute_raw(create_query)
                 
                 # Copy data if requested
                 if copy_data:
@@ -543,12 +520,8 @@ class MSSQL:
                         data_records = source_data.to_dict('records')
                         
                         # Insert data into target table
-                        rows_inserted = target_db.insert(target_table, data_records)
-                        self.logger.info(f"Copied {rows_inserted} rows from '{source_table}' to '{target_table}'")
-                    else:
-                        self.logger.info(f"No data to copy from '{source_table}' (empty result set)")
+                        target_db.insert(target_table, data_records)
                 
-                self.logger.info(f"Successfully copied table '{source_table}' to '{target_table}'")
                 return True
                 
             finally:
@@ -557,73 +530,61 @@ class MSSQL:
                     target_db.disconnect()
                     
         except Exception as e:
-            self.logger.error(f"Failed to copy table '{source_table}': {str(e)}")
             return False
     
-    def copy_table_structure_only(self, source_table: str, target_table: str = None,
-                                 target_database: str = None, target_server: str = None,
-                                 target_username: str = None, target_password: str = None,
-                                 target_port: int = None) -> bool:
-        """
-        Copy only the table structure (schema) without data.
+    def df_to_table(self, df: pd.DataFrame, table: str, if_exists: str = "fail") -> bool:
+        if df.empty:
+            return False
         
-        Args:
-            source_table (str): Name of the source table
-            target_table (str): Name of the target table (defaults to source_table)
-            target_database (str): Target database name (defaults to current database)
-            target_server (str): Target server IP/instance (defaults to current server)
-            target_username (str): Target server username (defaults to current username)
-            target_password (str): Target server password (defaults to current password)
-            target_port (int): Target server port (defaults to current port)
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        return self.copy_table(
-            source_table=source_table,
-            target_table=target_table,
-            target_database=target_database,
-            target_server=target_server,
-            target_username=target_username,
-            target_password=target_password,
-            target_port=target_port,
-            copy_data=False,
-            create_table=True
-        )
+        if if_exists == "fail" and self.is_table_exist(table):
+            return False
+        
+        if if_exists == "replace":
+            self.drop_table(table)
+        
+        dtype_map = {
+            'int64': 'BIGINT',
+            'int32': 'INT',
+            'int16': 'SMALLINT',
+            'int8': 'TINYINT',
+            'float64': 'FLOAT',
+            'float32': 'REAL',
+            'bool': 'BIT',
+            'datetime64[ns]': 'DATETIME2',
+            'object': 'NVARCHAR(MAX)'
+        }
+        
+        columns = {}
+        for col in df.columns:
+            dtype = str(df[col].dtype)
+            sql_type = dtype_map.get(dtype, 'NVARCHAR(MAX)')
+            if dtype.startswith('datetime'):
+                sql_type = 'DATETIME2'
+            columns[col] = sql_type
+        
+        if not self.is_table_exist(table):
+            self.create_table(table, columns)
+        
+        data_records = df.to_dict('records')
+        self.insert(table, data_records)
+        return True
     
-    def copy_table_data_only(self, source_table: str, target_table: str,
-                            target_database: str = None, target_server: str = None,
-                            target_username: str = None, target_password: str = None,
-                            target_port: int = None, where_clause: str = None) -> bool:
-        """
-        Copy only the data from source table to existing target table.
+    def export(self, tables_names: Union[str, List[str]], path: str, export_format: str = "csv") -> bool:
+        if isinstance(tables_names, str):
+            tables_names = [tables_names]
         
-        Args:
-            source_table (str): Name of the source table
-            target_table (str): Name of the target table (must exist)
-            target_database (str): Target database name (defaults to current database)
-            target_server (str): Target server IP/instance (defaults to current server)
-            target_username (str): Target server username (defaults to current username)
-            target_password (str): Target server password (defaults to current password)
-            target_port (int): Target server port (defaults to current port)
-            where_clause (str): Optional WHERE clause to filter data during copy
+        if export_format not in ["csv", "df"]:
+            return False
+        
+        for table_name in tables_names:
+            df = self.select(table_name)
             
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        return self.copy_table(
-            source_table=source_table,
-            target_table=target_table,
-            target_database=target_database,
-            target_server=target_server,
-            target_username=target_username,
-            target_password=target_password,
-            target_port=target_port,
-            copy_data=True,
-            create_table=False,
-            where_clause=where_clause
-        )
-
-    def __del__(self):
-        """Destructor to ensure connection is closed."""
-        self.disconnect()
+            if export_format == "csv":
+                file_path = f"{path}/{table_name}.csv" if not path.endswith('.csv') else path
+                df.to_csv(file_path, index=False)
+            elif export_format == "df":
+                file_path = f"{path}/{table_name}.pkl" if not path.endswith('.pkl') else path
+                df.to_pickle(file_path)
+        
+        return True
+    
