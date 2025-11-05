@@ -9,6 +9,8 @@ import pyodbc
 import pandas as pd
 from typing import List, Dict, Any, Optional, Union
 from contextlib import contextmanager
+from datetime import datetime
+import time
 
 
 class MSSQL:
@@ -22,7 +24,7 @@ class MSSQL:
     
     def __init__(self, ip_or_instance: str, username: str, password: str, 
                  database: str = "master", port: int = 1433, 
-                 driver: str = "ODBC Driver 17 for SQL Server"):
+                 driver: str = "ODBC Driver 17 for SQL Server", log_path: str = None):
         """
         Initialize MSSQL connection parameters.
         
@@ -33,6 +35,7 @@ class MSSQL:
             database (str): Database name (default: "master")
             port (int): Port number (default: 1433)
             driver (str): ODBC driver name
+            log_path (str): Path to log file for query logging (default: None)
         """
         self.ip_or_instance = ip_or_instance
         self.username = username
@@ -41,6 +44,7 @@ class MSSQL:
         self.port = port
         self.driver = driver
         self.connection = None
+        self.log_path = log_path
     
     def _get_connection_string(self) -> str:
         """Generate connection string for MSSQL database."""
@@ -52,6 +56,25 @@ class MSSQL:
             f"PWD={self.password};"
             "TrustServerCertificate=yes;"
         )
+    
+    def _log_query(self, operation_name: str, query: str, execution_time: float, result=None, is_select: bool = False):
+        if not self.log_path:
+            return
+        
+        now = datetime.now()
+        date_str = now.strftime("%y-%m-%d")
+        time_str = now.strftime("%H:%M:%S")
+        
+        with open(self.log_path, 'a', encoding='utf-8') as f:
+            f.write(f"========= {operation_name} *** {self.ip_or_instance} *** {self.username} *** {self.database} *** {date_str} *** {time_str} =========\n")
+            f.write(f"\n{query}\n\n")
+            f.write(f"Execution time: {execution_time:.4f} seconds\n\n")
+            
+            if is_select and result is not None and not result.empty:
+                first_row = result.iloc[0].to_dict()
+                f.write(f"First row: {first_row}\n\n")
+            elif not is_select and result is not None:
+                f.write(f"Rows affected: {result}\n\n")
     
     def connect(self) -> bool:
         """
@@ -128,13 +151,19 @@ class MSSQL:
         if limit:
             query += f" OFFSET 0 ROWS FETCH NEXT {limit} ROWS ONLY"
         
+        start_time = time.time()
         try:
             with self.get_cursor() as cursor:
                 cursor.execute(query)
                 columns = [column[0] for column in cursor.description]
                 data = cursor.fetchall()
-                return pd.DataFrame(data, columns=columns)
+                result = pd.DataFrame(data, columns=columns)
+                execution_time = time.time() - start_time
+                self._log_query("SELECT", query, execution_time, result, is_select=True)
+                return result
         except Exception as e:
+            execution_time = time.time() - start_time
+            self._log_query("SELECT", query, execution_time, None, is_select=True)
             raise
     
     def insert(self, table: str, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> int:
@@ -158,6 +187,7 @@ class MSSQL:
         placeholders = ", ".join(["?" for _ in columns])
         query = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"
         
+        start_time = time.time()
         try:
             with self.get_cursor() as cursor:
                 rows_affected = 0
@@ -167,9 +197,13 @@ class MSSQL:
                     rows_affected += cursor.rowcount
                 
                 self.connection.commit()
+                execution_time = time.time() - start_time
+                self._log_query("INSERT", query, execution_time, rows_affected, is_select=False)
                 return rows_affected
         except Exception as e:
             self.connection.rollback()
+            execution_time = time.time() - start_time
+            self._log_query("INSERT", query, execution_time, None, is_select=False)
             raise
     
     def update(self, table: str, data: Dict[str, Any], where: str) -> int:
@@ -187,15 +221,20 @@ class MSSQL:
         set_clause = ", ".join([f"{col} = ?" for col in data.keys()])
         query = f"UPDATE {table} SET {set_clause} WHERE {where}"
         
+        start_time = time.time()
         try:
             with self.get_cursor() as cursor:
                 values = list(data.values())
                 cursor.execute(query, values)
                 rows_affected = cursor.rowcount
                 self.connection.commit()
+                execution_time = time.time() - start_time
+                self._log_query("UPDATE", query, execution_time, rows_affected, is_select=False)
                 return rows_affected
         except Exception as e:
             self.connection.rollback()
+            execution_time = time.time() - start_time
+            self._log_query("UPDATE", query, execution_time, None, is_select=False)
             raise
     
     def delete(self, table: str, where: str) -> int:
@@ -211,14 +250,19 @@ class MSSQL:
         """
         query = f"DELETE FROM {table} WHERE {where}"
         
+        start_time = time.time()
         try:
             with self.get_cursor() as cursor:
                 cursor.execute(query)
                 rows_affected = cursor.rowcount
                 self.connection.commit()
+                execution_time = time.time() - start_time
+                self._log_query("DELETE", query, execution_time, rows_affected, is_select=False)
                 return rows_affected
         except Exception as e:
             self.connection.rollback()
+            execution_time = time.time() - start_time
+            self._log_query("DELETE", query, execution_time, None, is_select=False)
             raise
     
     def execute_raw(self, query: str, params: tuple = None) -> pd.DataFrame:
@@ -232,6 +276,8 @@ class MSSQL:
         Returns:
             pd.DataFrame: Query results as pandas DataFrame
         """
+        is_select = query.strip().upper().startswith('SELECT')
+        start_time = time.time()
         try:
             with self.get_cursor() as cursor:
                 if params:
@@ -239,15 +285,23 @@ class MSSQL:
                 else:
                     cursor.execute(query)
                 
-                if query.strip().upper().startswith('SELECT'):
+                if is_select:
                     columns = [column[0] for column in cursor.description]
                     data = cursor.fetchall()
-                    return pd.DataFrame(data, columns=columns)
+                    result = pd.DataFrame(data, columns=columns)
+                    execution_time = time.time() - start_time
+                    self._log_query("EXECUTE_RAW", query, execution_time, result, is_select=True)
+                    return result
                 else:
+                    rows_affected = cursor.rowcount
                     self.connection.commit()
+                    execution_time = time.time() - start_time
+                    self._log_query("EXECUTE_RAW", query, execution_time, rows_affected, is_select=False)
                     return pd.DataFrame()
         except Exception as e:
             self.connection.rollback()
+            execution_time = time.time() - start_time
+            self._log_query("EXECUTE_RAW", query, execution_time, None, is_select=is_select)
             raise
     
     def get_table_info(self, table: str) -> pd.DataFrame:
@@ -275,7 +329,7 @@ class MSSQL:
         """
         return self.execute_raw(query, (table,))
     
-    def get_tables(self, like: str = None) -> List[str]:
+    def get_all_tables(self, like: str = None) -> List[str]:
         """
         Get list of all tables in the database.
         
@@ -293,7 +347,7 @@ class MSSQL:
             result = self.execute_raw(query)
         return result['TABLE_NAME'].tolist()
     
-    def get_databases(self) -> List[str]:
+    def get_all_databases(self) -> List[str]:
         """
         Get list of all databases on the server.
         
@@ -397,12 +451,46 @@ class MSSQL:
         except Exception as e:
             return False
     
-    def copy_table(self, source_table: str, target_table: str = None, 
-                   target_database: str = None, target_server: str = None,
-                   target_username: str = None, target_password: str = None,
-                   target_port: int = 1433, copy_data: bool = True) -> bool:
+    def _copy_table_structure(self, source_table: str, target_table: str,
+                               target_db, table_info: pd.DataFrame) -> bool:
+        target_exists = target_db.is_table_exist(target_table)
+        
+        if not target_exists:
+            column_definitions = []
+            for _, row in table_info.iterrows():
+                col_name = row['COLUMN_NAME']
+                data_type = row['DATA_TYPE']
+                is_nullable = row['IS_NULLABLE']
+                char_length = row['CHARACTER_MAXIMUM_LENGTH']
+                numeric_precision = row['NUMERIC_PRECISION']
+                numeric_scale = row['NUMERIC_SCALE']
+                
+                if data_type in ['varchar', 'nvarchar', 'char', 'nchar'] and char_length:
+                    if char_length == -1:
+                        col_def = f"{col_name} {data_type}(MAX)"
+                    else:
+                        col_def = f"{col_name} {data_type}({char_length})"
+                elif data_type in ['decimal', 'numeric'] and numeric_precision and numeric_scale:
+                    col_def = f"{col_name} {data_type}({numeric_precision},{numeric_scale})"
+                else:
+                    col_def = f"{col_name} {data_type}"
+                
+                if is_nullable == 'NO':
+                    col_def += " NOT NULL"
+                
+                column_definitions.append(col_def)
+            
+            create_query = f"CREATE TABLE {target_table} ({', '.join(column_definitions)})"
+            target_db.execute_raw(create_query)
+        
+        return True
+    
+    def copy_table_with_data(self, source_table: str, target_table: str = None, 
+                             target_database: str = None, target_server: str = None,
+                             target_username: str = None, target_password: str = None,
+                             target_port: int = 1433, where_clause: str = None) -> bool:
         """
-        Copy a table from source to target database.
+        Copy a table from source to target database with data.
         
         This method can copy tables within the same database, between different databases
         on the same server, or between different servers entirely.
@@ -415,15 +503,12 @@ class MSSQL:
             target_username (str): Target server username (defaults to current username)
             target_password (str): Target server password (defaults to current password)
             target_port (int): Target server port (defaults to current port)
-            copy_data (bool): Whether to copy data (default: True)
-            create_table (bool): Whether to create target table if it doesn't exist (default: True)
             where_clause (str): Optional WHERE clause to filter data during copy
             
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            # Set defaults
             if target_table is None:
                 target_table = source_table
             if target_database is None:
@@ -437,16 +522,13 @@ class MSSQL:
             if target_port is None:
                 target_port = self.port
             
-            # Check if source table exists
             if not self.is_table_exist(source_table):
                 return False
             
-            # Get source table structure
             table_info = self.get_table_info(source_table)
             if table_info.empty:
                 return False
             
-            # Create target connection if different server/database
             target_db = None
             if (target_server != self.ip_or_instance or 
                 target_database != self.database or 
@@ -469,63 +551,98 @@ class MSSQL:
                 target_db = self
             
             try:
-                # Check if target table exists
-                target_exists = target_db.is_table_exist(target_table)
+                if not self._copy_table_structure(source_table, target_table, target_db, table_info):
+                    return False
                 
-                if create_table and not target_exists:
-                    # Create target table with same structure
-                    column_definitions = []
-                    for _, row in table_info.iterrows():
-                        col_name = row['COLUMN_NAME']
-                        data_type = row['DATA_TYPE']
-                        is_nullable = row['IS_NULLABLE']
-                        char_length = row['CHARACTER_MAXIMUM_LENGTH']
-                        numeric_precision = row['NUMERIC_PRECISION']
-                        numeric_scale = row['NUMERIC_SCALE']
-                        
-                        # Build column definition
-                        if data_type in ['varchar', 'nvarchar', 'char', 'nchar'] and char_length:
-                            if char_length == -1:  # MAX
-                                col_def = f"{col_name} {data_type}(MAX)"
-                            else:
-                                col_def = f"{col_name} {data_type}({char_length})"
-                        elif data_type in ['decimal', 'numeric'] and numeric_precision and numeric_scale:
-                            col_def = f"{col_name} {data_type}({numeric_precision},{numeric_scale})"
-                        else:
-                            col_def = f"{col_name} {data_type}"
-                        
-                        if is_nullable == 'NO':
-                            col_def += " NOT NULL"
-                        
-                        column_definitions.append(col_def)
-                    
-                    create_query = f"CREATE TABLE {target_table} ({', '.join(column_definitions)})"
-                    
-                    target_db.execute_raw(create_query)
+                columns = table_info['COLUMN_NAME'].tolist()
+                select_query = f"SELECT {', '.join(columns)} FROM {source_table}"
                 
-                # Copy data if requested
-                if copy_data:
-                    # Build SELECT query for source data
-                    columns = table_info['COLUMN_NAME'].tolist()
-                    select_query = f"SELECT {', '.join(columns)} FROM {source_table}"
-                    
-                    if where_clause:
-                        select_query += f" WHERE {where_clause}"
-                    
-                    # Get source data
-                    source_data = self.execute_raw(select_query)
-                    
-                    if not source_data.empty:
-                        # Convert DataFrame to list of dictionaries for insert
-                        data_records = source_data.to_dict('records')
-                        
-                        # Insert data into target table
-                        target_db.insert(target_table, data_records)
+                if where_clause:
+                    select_query += f" WHERE {where_clause}"
+                
+                source_data = self.execute_raw(select_query)
+                
+                if not source_data.empty:
+                    data_records = source_data.to_dict('records')
+                    target_db.insert(target_table, data_records)
                 
                 return True
                 
             finally:
-                # Close target connection if it was created
+                if target_db != self:
+                    target_db.disconnect()
+                    
+        except Exception as e:
+            return False
+    
+    def copy_table_without_data(self, source_table: str, target_table: str = None, 
+                                target_database: str = None, target_server: str = None,
+                                target_username: str = None, target_password: str = None,
+                                target_port: int = 1433) -> bool:
+        """
+        Copy a table structure from source to target database without data.
+        
+        This method can copy table structures within the same database, between different databases
+        on the same server, or between different servers entirely.
+        
+        Args:
+            source_table (str): Name of the source table to copy
+            target_table (str): Name of the target table (defaults to source_table)
+            target_database (str): Target database name (defaults to current database)
+            target_server (str): Target server IP/instance (defaults to current server)
+            target_username (str): Target server username (defaults to current username)
+            target_password (str): Target server password (defaults to current password)
+            target_port (int): Target server port (defaults to current port)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            if target_table is None:
+                target_table = source_table
+            if target_database is None:
+                target_database = self.database
+            if target_server is None:
+                target_server = self.ip_or_instance
+            if target_username is None:
+                target_username = self.username
+            if target_password is None:
+                target_password = self.password
+            if target_port is None:
+                target_port = self.port
+            
+            if not self.is_table_exist(source_table):
+                return False
+            
+            table_info = self.get_table_info(source_table)
+            if table_info.empty:
+                return False
+            
+            target_db = None
+            if (target_server != self.ip_or_instance or 
+                target_database != self.database or 
+                target_username != self.username or 
+                target_password != self.password or 
+                target_port != self.port):
+                
+                target_db = MSSQL(
+                    ip_or_instance=target_server,
+                    username=target_username,
+                    password=target_password,
+                    database=target_database,
+                    port=target_port,
+                    driver=self.driver
+                )
+                
+                if not target_db.connect():
+                    return False
+            else:
+                target_db = self
+            
+            try:
+                return self._copy_table_structure(source_table, target_table, target_db, table_info)
+                
+            finally:
                 if target_db != self:
                     target_db.disconnect()
                     
